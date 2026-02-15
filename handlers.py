@@ -155,11 +155,12 @@ def register_handlers(dp, bot: Bot):
                 await status_msg.edit_text("📤 Отправляю видео...")
 
                 # Формируем подпись для видео
-                caption = f"✅ {title[:100]}\n"
-                if duration:
-                    caption += f"⏱ Длительность: {format_duration(duration)}\n"
-                caption += f"💾 Размер: {file_size_mb:.1f} МБ\n"
-                caption += f"📍 Платформа: {platform.capitalize()}"
+                caption = f"✅ {title[:100]}\n\n"
+                # if duration:
+                #     caption += f"⏱ Длительность: {format_duration(duration)}\n"
+                # caption += f"💾 Размер: {file_size_mb:.1f} МБ\n"
+                # caption += f"📍 Платформа: {platform.capitalize()}\n\n"
+                caption += "@LoadReelsBot"
 
                 video_file = FSInputFile(filename)
                 channel_message_id = None

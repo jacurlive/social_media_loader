@@ -38,26 +38,26 @@ def register_handlers(dp, bot: Bot):
             # "▶️ YouTube (shorts, видео)\n"
             # "🐦 Twitter/X\n"
             # "И многие другие!\n\n"
-            "Команды:\n"
-            "/stats - статистика скачиваний\n\n"
+            # "Команды:\n"
+            # "/stats - статистика скачиваний\n\n"
             "Попробуй прямо сейчас! 🚀"
         )
 
-    @dp.message(F.text == "/stats")
-    async def cmd_stats(message: Message):
-        """Обработчик команды /stats"""
-        try:
-            stats = get_stats()
-            await message.answer(
-                f"📊 Статистика бота:\n\n"
-                f"Всего скачиваний: {stats['total']}\n"
-                f"🎥 TikTok: {stats['tiktok']}\n"
-                f"📸 Instagram: {stats['instagram']}\n"
-                f"▶️ YouTube: {stats['youtube']}"
-            )
-        except Exception as e:
-            logger.error(f"Ошибка при получении статистики: {e}")
-            await message.answer("Ошибка при получении статистики")
+    # @dp.message(F.text == "/stats")
+    # async def cmd_stats(message: Message):
+    #     """Обработчик команды /stats"""
+    #     try:
+    #         stats = get_stats()
+    #         await message.answer(
+    #             f"📊 Статистика бота:\n\n"
+    #             f"Всего скачиваний: {stats['total']}\n"
+    #             f"🎥 TikTok: {stats['tiktok']}\n"
+    #             f"📸 Instagram: {stats['instagram']}\n"
+    #             f"▶️ YouTube: {stats['youtube']}"
+    #         )
+    #     except Exception as e:
+    #         logger.error(f"Ошибка при получении статистики: {e}")
+    #         await message.answer("Ошибка при получении статистики")
 
     @dp.message(Command("admin_stats"))
     async def cmd_admin_stats(message: Message):

@@ -1,8 +1,10 @@
 """
-Модуль для скачивания видео через yt-dlp
+Модуль для скачивания медиа через yt-dlp
 """
 import asyncio
 import os
+import re
+import aiohttp
 import yt_dlp
 from datetime import datetime
 from urllib.parse import quote
@@ -12,16 +14,16 @@ from config import (
 )
 
 
+IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'webp', 'gif'}
+
+
 async def download_video(url: str, platform: str):
     """
-    Скачивание видео через yt-dlp
-    
-    Args:
-        url: URL видео для скачивания
-        platform: Платформа (instagram, tiktok, youtube, twitter, other)
-    
+    Скачивание медиа через yt-dlp (или tikwm для TikTok)
+
     Returns:
-        tuple: (filename, title, duration) или (None, None, None) при ошибке
+        tuple: (filename, title, duration, width, height, description, media_type)
+               media_type: 'video' или 'image'
     """
     try:
         # Создаем папку для загрузок если её нет
@@ -47,6 +49,10 @@ async def download_video(url: str, platform: str):
         # Дополнительные настройки для Instagram
         if platform == 'instagram':
             ydl_opts['format'] = 'best[ext=mp4]/best'
+
+        # Дополнительные настройки для Pinterest
+        if platform == 'pinterest':
+            ydl_opts['format'] = 'best'
 
         # Дополнительные настройки для TikTok
         if platform == 'tiktok':
@@ -112,16 +118,27 @@ async def download_video(url: str, platform: str):
 
         filename, info = await loop.run_in_executor(None, download_sync)
 
-        # Получаем информацию о видео
-        title = info.get('title', 'Video')
+        # Получаем информацию о медиа
+        title = info.get('title', 'Media')
         duration = info.get('duration', 0)
+        width = info.get('width')
+        height = info.get('height')
+        description = info.get('description', '') or ''
 
-        return filename, title, duration
+        ext = os.path.splitext(filename)[1].lstrip('.').lower()
+        media_type = 'image' if ext in IMAGE_EXTENSIONS else 'video'
+
+        return filename, title, duration, width, height, description, media_type
 
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Ошибка при скачивании через yt-dlp: {error_msg}")
-        
+
+        # Фолбэк для Pinterest: скачиваем изображение напрямую
+        if platform == 'pinterest' and 'no video formats' in error_msg.lower():
+            logger.info("Пробуем скачать Pinterest изображение напрямую...")
+            return await _download_pinterest_image(url)
+
         # Дополнительная информация для отладки
         if platform == 'tiktok' and PROXY_IP and PROXY_PORT:
             logger.error(f"Прокси настроен: {PROXY_TYPE}://{PROXY_IP}:{PROXY_PORT}")
@@ -132,6 +149,62 @@ async def download_video(url: str, platform: str):
                 logger.error("2. TikTok блокирует запросы через этот прокси")
                 logger.error("3. Недостаточный таймаут (попробуйте увеличить PROXY_TIMEOUT)")
                 logger.error("4. Попробуйте использовать socks5 вместо http (измените PROXY_TYPE)")
-        
-        return None, None, None
+
+        return None, None, None, None, None, None, None
+
+
+async def _download_pinterest_image(url: str):
+    """Скачивание изображения Pinterest напрямую через HTTP"""
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                      '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+    }
+    try:
+        async with aiohttp.ClientSession(headers=headers) as session:
+            async with session.get(url) as resp:
+                html = await resp.text()
+
+        # Извлекаем og:image — наилучшее качество
+        img_match = re.search(r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"', html)
+        if not img_match:
+            # Альтернативный порядок атрибутов
+            img_match = re.search(r'<meta[^>]+content="([^"]+)"[^>]+property="og:image"', html)
+        if not img_match:
+            logger.error("Pinterest: не удалось найти og:image на странице")
+            return None, None, None, None, None, None, None
+
+        image_url = img_match.group(1)
+
+        title_match = re.search(r'<meta[^>]+property="og:title"[^>]+content="([^"]+)"', html)
+        title = title_match.group(1) if title_match else 'Pinterest'
+
+        desc_match = re.search(r'<meta[^>]+property="og:description"[^>]+content="([^"]+)"', html)
+        description = desc_match.group(1) if desc_match else ''
+
+        # Скачиваем изображение
+        if not os.path.exists(DOWNLOADS_DIR):
+            os.makedirs(DOWNLOADS_DIR)
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+        async with aiohttp.ClientSession(headers=headers) as session:
+            async with session.get(image_url) as resp:
+                content_type = resp.headers.get('content-type', 'image/jpeg')
+                ext = 'jpg'
+                if 'png' in content_type:
+                    ext = 'png'
+                elif 'webp' in content_type:
+                    ext = 'webp'
+
+                filename = os.path.join(DOWNLOADS_DIR, f'pinterest_{timestamp}.{ext}')
+                with open(filename, 'wb') as f:
+                    f.write(await resp.read())
+
+        logger.info(f"Pinterest изображение скачано: {filename}")
+        return filename, title, 0, None, None, description, 'image'
+
+    except Exception as e:
+        logger.error(f"Ошибка при прямом скачивании Pinterest изображения: {e}")
+        return None, None, None, None, None, None, None
 

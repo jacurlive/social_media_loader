@@ -4,15 +4,21 @@
 import os
 from aiogram import F, Bot
 from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, FSInputFile
+from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
 from config import MAX_FILE_SIZE_MB, CHANNEL_ID, ADMIN_ID, logger
 from database import (
-    add_user, get_media_by_url, save_media, 
-    get_stats, get_user_stats
+    add_user, get_media_by_url, save_media,
+    get_stats, get_user_stats, get_media_description
 )
 from downloader import download_video
 from utils import detect_platform, format_duration
+
+
+def _desc_keyboard(media_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="Получить текст поста", callback_data=f"get_desc:{media_id}")
+    ]])
 
 
 def register_handlers(dp, bot: Bot):
@@ -30,16 +36,11 @@ def register_handlers(dp, bot: Bot):
         )
         
         await message.answer(
-            "👋 Привет! Я бот для скачивания видео из социальных сетей.\n\n"
-            "📎 Просто отправь мне ссылку на видео, и я скачаю его для тебя!\n\n"
+            "👋 Привет! Я бот для скачивания медиа из социальных сетей.\n\n"
+            "📎 Просто отправь мне ссылку, и я скачаю медиа для тебя!\n\n"
             "Поддерживаемые платформы:\n"
-            # "🎥 TikTok\n"
             "📸 Instagram (посты, reels, IGTV)\n"
-            # "▶️ YouTube (shorts, видео)\n"
-            # "🐦 Twitter/X\n"
-            # "И многие другие!\n\n"
-            # "Команды:\n"
-            # "/stats - статистика скачиваний\n\n"
+            "📌 Pinterest (фото, видео)\n\n"
             "Попробуй прямо сейчас! 🚀"
         )
 
@@ -111,12 +112,16 @@ def register_handlers(dp, bot: Bot):
         if existing_media and CHANNEL_ID:
             # Видео уже есть в базе - пересылаем из канала
             try:
-                # await message.answer("✅ Это видео уже было скачано ранее. Пересылаю...")
                 await bot.copy_message(
                     chat_id=message.chat.id,
                     from_chat_id=CHANNEL_ID,
                     message_id=existing_media['channel_message_id']
                 )
+                if platform != 'pinterest':
+                    await message.answer(
+                        "Нажмите, чтобы получить текст поста 👇",
+                        reply_markup=_desc_keyboard(existing_media['id'])
+                    )
                 return
             except Exception as e:
                 logger.error(f"Ошибка при пересылке из канала: {e}")
@@ -136,7 +141,7 @@ def register_handlers(dp, bot: Bot):
             # Скачиваем видео
             await status_msg.edit_text("📥 Скачиваю видео... Это может занять некоторое время.")
 
-            filename, title, duration = await download_video(url, platform)
+            filename, title, duration, width, height, description, media_type = await download_video(url, platform)
 
             if filename and os.path.exists(filename):
                 # Проверяем размер файла
@@ -165,15 +170,24 @@ def register_handlers(dp, bot: Bot):
                 video_file = FSInputFile(filename)
                 channel_message_id = None
 
-                # Отправляем видео в канал, если указан CHANNEL_ID
+                # Отправляем медиа в канал, если указан CHANNEL_ID
                 if CHANNEL_ID:
                     try:
-                        channel_msg = await bot.send_video(
-                            chat_id=CHANNEL_ID,
-                            video=video_file,
-                            caption=caption,
-                            supports_streaming=True
-                        )
+                        if media_type == 'image':
+                            channel_msg = await bot.send_photo(
+                                chat_id=CHANNEL_ID,
+                                photo=video_file,
+                                caption=caption
+                            )
+                        else:
+                            channel_msg = await bot.send_video(
+                                chat_id=CHANNEL_ID,
+                                video=video_file,
+                                caption=caption,
+                                width=width,
+                                height=height,
+                                supports_streaming=True
+                            )
                         channel_message_id = channel_msg.message_id
                     except Exception as e:
                         logger.error(f"Ошибка при отправке в канал: {e}")
@@ -184,17 +198,19 @@ def register_handlers(dp, bot: Bot):
                         return
 
                 # Сохраняем информацию о медиа в базу данных
+                media_id = None
                 if channel_message_id:
-                    save_media(
+                    media_id = save_media(
                         url=url,
                         platform=platform,
                         channel_message_id=channel_message_id,
                         title=title,
                         duration=duration,
-                        file_size_mb=file_size_mb
+                        file_size_mb=file_size_mb,
+                        description=description
                     )
 
-                # Пересылаем видео пользователю из канала или отправляем напрямую
+                # Пересылаем медиа пользователю из канала или отправляем напрямую
                 if CHANNEL_ID and channel_message_id:
                     await bot.copy_message(
                         chat_id=message.chat.id,
@@ -203,14 +219,30 @@ def register_handlers(dp, bot: Bot):
                     )
                 else:
                     # Если канал не настроен, отправляем напрямую
-                    await message.answer_video(
-                        video_file,
-                        caption=caption,
-                        supports_streaming=True
-                    )
+                    if media_type == 'image':
+                        await message.answer_photo(video_file, caption=caption)
+                    else:
+                        await message.answer_video(
+                            video_file,
+                            caption=caption,
+                            width=width,
+                            height=height,
+                            supports_streaming=True
+                        )
+
+                # Для фото дополнительно отправляем файл JPG
+                if media_type == 'image':
+                    await message.answer_document(FSInputFile(filename))
 
                 # Удаляем статусное сообщение
                 await status_msg.delete()
+
+                # Кнопка текста поста — только не для Pinterest
+                if media_id and platform != 'pinterest':
+                    await message.answer(
+                        "Нажмите, чтобы получить текст поста 👇",
+                        reply_markup=_desc_keyboard(media_id)
+                    )
 
                 # Удаляем файл после отправки
                 os.remove(filename)
@@ -232,3 +264,13 @@ def register_handlers(dp, bot: Bot):
                 f"Ошибка: {str(e)[:100]}\n\n"
                 f"Попробуйте позже или отправьте другую ссылку."
             )
+
+    @dp.callback_query(F.data.startswith("get_desc:"))
+    async def callback_get_desc(callback: CallbackQuery):
+        """Показать текст поста по нажатию кнопки"""
+        media_id = int(callback.data.split(":")[1])
+        description = get_media_description(media_id)
+
+        text = description.strip() if description.strip() else "Описание отсутствует"
+        await callback.message.edit_text(text, reply_markup=None)
+        await callback.answer()

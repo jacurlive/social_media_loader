@@ -35,9 +35,17 @@ def init_db():
             title TEXT,
             duration INTEGER,
             file_size_mb REAL,
-            download_date TEXT
+            download_date TEXT,
+            description TEXT
         )
     ''')
+
+    # Миграция: добавляем description если таблица уже существовала без неё
+    try:
+        cursor.execute('ALTER TABLE media ADD COLUMN description TEXT')
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Колонка уже существует
     
     # Старая таблица downloads (оставляем для совместимости со статистикой)
     cursor.execute('''
@@ -77,31 +85,44 @@ def get_media_by_url(url):
     """Получение информации о медиа по URL"""
     conn = sqlite3.connect(DATABASE_NAME)
     cursor = conn.cursor()
-    cursor.execute('SELECT url, channel_message_id, platform FROM media WHERE url = ?', (url,))
+    cursor.execute('SELECT id, url, channel_message_id, platform, description FROM media WHERE url = ?', (url,))
     result = cursor.fetchone()
     conn.close()
-    
+
     if result:
         return {
-            'url': result[0],
-            'channel_message_id': result[1],
-            'platform': result[2]
+            'id': result[0],
+            'url': result[1],
+            'channel_message_id': result[2],
+            'platform': result[3],
+            'description': result[4] or '',
         }
     return None
 
 
-def save_media(url, platform, channel_message_id, title=None, duration=None, file_size_mb=None):
-    """Сохранение информации о скачанном медиа"""
+def get_media_description(media_id):
+    """Получение описания поста по ID медиа"""
+    conn = sqlite3.connect(DATABASE_NAME)
+    cursor = conn.cursor()
+    cursor.execute('SELECT description FROM media WHERE id = ?', (media_id,))
+    result = cursor.fetchone()
+    conn.close()
+    return result[0] or '' if result else ''
+
+
+def save_media(url, platform, channel_message_id, title=None, duration=None, file_size_mb=None, description=None):
+    """Сохранение информации о скачанном медиа, возвращает id записи"""
     conn = sqlite3.connect(DATABASE_NAME)
     cursor = conn.cursor()
     try:
         cursor.execute('''
-            INSERT OR REPLACE INTO media 
-            (url, platform, channel_message_id, title, duration, file_size_mb, download_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (url, platform, channel_message_id, title, duration, file_size_mb, 
-              datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+            INSERT OR REPLACE INTO media
+            (url, platform, channel_message_id, title, duration, file_size_mb, download_date, description)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (url, platform, channel_message_id, title, duration, file_size_mb,
+              datetime.now().strftime('%Y-%m-%d %H:%M:%S'), description))
         conn.commit()
+        return cursor.lastrowid
     finally:
         conn.close()
 

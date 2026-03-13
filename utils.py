@@ -9,7 +9,9 @@ def detect_platform(url: str) -> Optional[str]:
     url_lower = url.lower()
     if 'instagram.com' in url_lower or 'instagr.am' in url_lower:
         return 'instagram'
-    # elif 'tiktok.com' in url_lower or 'vm.tiktok.com' in url_lower:
+    elif 'pinterest.com' in url_lower or 'pinterest.ru' in url_lower or 'pin.it' in url_lower:
+        return 'pinterest'
+    # elif 'tiktok.com' in url_lower or 'vm.tiktok.com' in url_lower or 'vt.tiktok.com' in url_lower:
     #     return 'tiktok'
     # elif 'youtube.com' in url_lower or 'youtu.be' in url_lower:
     #     return 'youtube'
